@@ -1,4 +1,4 @@
-name: 5-Minute Rainfall Scraper
+name: 15-Minute Banjir Scraper
 
 on:
   workflow_dispatch:
