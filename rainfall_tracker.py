@@ -7,14 +7,29 @@ from datetime import datetime
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-DISTRICT_ID = 5  # Kuala Langat
+DISTRICT_ID = -1
 BASE_CONFIG_URL = "https://infobanjirjps.selangor.gov.my/data/config.json"
-CSV_FILE = "selangor_rainfall_data.csv"
+DATA_DIR = "data"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json, text/plain, */*"
 }
+
+def get_target_csv_filename():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    now = datetime.now()
+    day = now.day
+
+    if day <= 10:
+        period = "part1"
+    elif day <= 20:
+        period = "part2"
+    else:
+        period = "part3"
+
+    filename = f"selangor_rainfall_{now.strftime('%Y_%m')}_{period}.csv"
+    return os.path.join(DATA_DIR, filename)
 
 def fetch_with_retry(url, retries=3, backoff=5):
     for attempt in range(1, retries + 1):
@@ -57,14 +72,12 @@ def fetch_rainfall_data():
 
     records = []
     for s in stations:
-        # Keep only active 'Online' telemetry stations (matching the UI)
         if s.get("stationStatus") != 1:
             continue
 
         hourly_rf = s.get("hourlyRainfall")
         today_rf = s.get("todayRainfall")
 
-        # Skip offline/broken sensor sentinels (-9999)
         if (hourly_rf is not None and hourly_rf <= -900) or (today_rf is not None and today_rf <= -900):
             continue
 
@@ -87,10 +100,13 @@ def save_and_deduplicate(new_df):
         print("No valid active rainfall records to append.")
         return
 
+    csv_file = get_target_csv_filename()
+    print(f"Target file: {csv_file}")
+
     existing_df = pd.DataFrame()
-    if os.path.exists(CSV_FILE):
+    if os.path.exists(csv_file):
         try:
-            existing_df = pd.read_csv(CSV_FILE)
+            existing_df = pd.read_csv(csv_file)
             if "Total_1Hour_mm" in existing_df.columns:
                 existing_df = existing_df[existing_df["Total_1Hour_mm"] > -900]
         except pd.errors.EmptyDataError:
@@ -98,14 +114,13 @@ def save_and_deduplicate(new_df):
 
     if not existing_df.empty:
         combined = pd.concat([existing_df, new_df], ignore_index=True)
-        # Deduplicate by Station ID and Timestamp
         combined = combined.drop_duplicates(subset=["Station_ID", "Last_Updated"], keep="last")
         added = len(combined) - len(existing_df)
-        combined.to_csv(CSV_FILE, index=False)
-        print(f"Appended {added} new rainfall record(s). Total: {len(combined)}")
+        combined.to_csv(csv_file, index=False)
+        print(f"Appended {added} new rainfall record(s) to {csv_file}. Total: {len(combined)}")
     else:
-        new_df.to_csv(CSV_FILE, index=False)
-        print(f"Initialized {CSV_FILE} with {len(new_df)} initial records.")
+        new_df.to_csv(csv_file, index=False)
+        print(f"Initialized {csv_file} with {len(new_df)} initial records.")
 
 if __name__ == "__main__":
     data = fetch_rainfall_data()
